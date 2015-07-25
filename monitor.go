@@ -57,11 +57,7 @@ type Xref struct {
 	To   string
 }
 
-// TODO
-// sonic client and database server ports / pid warnings
-
 var WebsocketHandler = websocket.Handler(WebsocketServer)
-
 var knownHostsFileFlag = flag.String("knownHostsFile", "", "File containing the xref for known IPs and names")
 var knownConnectionsFileFlag = flag.String("knownConnectionsFile", "", "File containing the xref for known IPs and ports")
 var showSshFlag = flag.Bool("showSsh", false, "Send ssh nodes")
@@ -426,7 +422,6 @@ func psHost(host string, ch chan string) {
 										processType = "sonicClient"
 										break
 									}
-									//TODO look for the correct way to id the sonic brokers
 								}
 							} else if strings.HasPrefix(e, "com.myorg.") {
 								if (i + 3) < len(cmdLine) {
