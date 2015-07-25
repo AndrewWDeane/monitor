@@ -455,7 +455,9 @@ func psHost(host string, ch chan string) {
 						processType = "netcat"
 					default:
 						// do something?
+						processType = executable
 						instanceName = ""
+						instanceName = strings.Join(cmdLine, "_")
 					}
 
 					if instanceName != "" {
@@ -549,7 +551,6 @@ func monitorHosts() {
 				connection.LocalInstanceName = instanceNameArray[0]
 				connection.LocalInstanceType = instanceNameArray[1]
 			} else {
-				//look in the map to xref the host, that way we can name the alias internal 10.??? addresses
 				connectionName := fmt.Sprintf("%v:%v", connection.LocalHost, connection.LocalSocket)
 				if xrefHost, ok := knownConnections[connectionName]; ok {
 					connectionName = xrefHost
@@ -557,8 +558,6 @@ func monitorHosts() {
 
 				connection.LocalInstanceName = connectionName
 
-				// local connection host may be on the second network interface, 10.... e.g. fix2spark
-				// so look for the host
 				if xrefHost, ok := knownHosts[connection.LocalHost]; ok {
 					connection.LocalHost = xrefHost
 				}
