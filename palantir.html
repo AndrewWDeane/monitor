@@ -1,0 +1,1160 @@
+<script src="processing.js"></script>
+<link type="text/css" href="css/vader/jquery-ui-1.8.17.custom.css" rel="stylesheet" />   
+<script src="jquery.min.js" type="text/javascript"></script>
+<script src="jquery-ui-1.8.17.custom.min.js" type="text/javascript"></script>
+<script src="json2.js" type="text/javascript"></script>
+<style>
+	body { font-size: 62.5%; }
+	label, input { display:block; }
+	input.text { margin-bottom:12px; width:95%; padding: .4em; }
+	fieldset { padding:0; border:0; margin-top:25px; }
+	h1 { font-size: 1.2em; margin: .6em 0; }
+	.ui-dialog .ui-state-error { padding: .3em; }
+</style>
+<script type="text/processing" data-processing-target="mycanvas">
+
+Object palantirContext =  Object();
+
+// Node
+class Node {
+
+    float x, y;
+    float dx, dy;
+    boolean fixed;
+    String Status;
+    String Stdout;
+    String Type;
+    String Name;
+    String host;
+    int count;
+    int pulse;
+    boolean drawNode;
+
+    Node(String name) {
+        Name = name;
+        x = random(width);
+        y = random(height);
+        drawNode = true;
+    }
+
+    void increment() {
+        count++;
+    }
+
+    void relax() {
+        float ddx = 0;
+        float ddy = 0;
+
+        for (int j = 0; j < palantirContext.nodeCount; j++) {
+            Node n = palantirContext.nodes[j];
+            if (n != this && n.drawNode) {
+                float vx = x - n.x;
+                float vy = y - n.y;
+                float lensq = vx * vx + vy * vy;
+                if (lensq == 0) {
+                    ddx += random(1);
+                    ddy += random(1);
+                } else if (lensq < 100*100) {
+                    ddx += vx / lensq;
+                    ddy += vy / lensq;
+                }
+            }
+        }
+
+        float dlen = mag(ddx, ddy) / 2;
+        if (dlen > 0) {
+            dx += ddx / dlen;
+            dy += ddy / dlen;
+        }
+
+    }
+
+    void update() {
+        if (!fixed) {
+            // dont do too much in one frame
+            x += constrain(dx, -5, 5);
+            y += constrain(dy, -5, 5);
+            // contain in the window
+            x = constrain(x, 0, width);
+            y = constrain(y, 0, height);
+        }
+
+        dx /= 2;
+        dy /= 2;
+    }
+
+    void draw() {
+        Color thisColor;
+        thisColor = palantirContext.nodeColor;
+        if (Status == "ok") {
+            thisColor = palantirContext.okColor;
+            if (palantirContext.colorNodes) {
+                if (Type == "database" || Type == "databaseServer") {
+                    thisColor = palantirContext.databaseColor;
+                }
+                if (Type == "java") {
+                    thisColor = palantirContext.javaColor;
+                }
+                if (host.match("^[0-9]")) {
+                    thisColor = palantirContext.externalColor;
+                }
+           }
+
+        }
+        if (Status == "warning") {
+            thisColor = palantirContext.warningColor;
+        }
+        if (Status == "error") {
+            thisColor = palantirContext.errorColor;
+        }
+
+
+        noStroke();
+        fill(thisColor);
+        ellipse(x, y, constrain(count,1,10) * 9, constrain(count,1,10) * 9);
+
+        if (palantirContext.drawRings) {
+            if (pulse >= 1) {
+                fill(thisColor,100);
+                ellipse(x, y, constrain(count,1,10) * 10, constrain(count,1,10) * 10);
+            }
+            if (pulse >= 2) {
+                fill(thisColor,50);
+                ellipse(x, y, constrain(count,1,10) * 11, constrain(count,1,10) * 11);
+            }
+            if (pulse >= 3) {
+                fill(thisColor,25);
+                ellipse(x, y, constrain(count,1,10) * 12, constrain(count,1,10) * 12);
+            }
+            if (pulse >= 4) {
+                fill(thisColor,12);
+                ellipse(x, y, constrain(count,1,10) * 14, constrain(count,1,10) * 14);
+            }
+            if (pulse == 5) {
+                fill(thisColor,6);
+                ellipse(x, y, constrain(count,1,10) * 17, constrain(count,1,10) * 17);
+                pulse = -1;
+            }
+            
+            if (true || random(0.1,1) >= 0.5) {
+                pulse += 1;
+            }
+
+            if (Status === "ok" || !palantirContext.pulseStuff) {
+                pulse = 5;
+            }
+        }
+
+        fill(#ADADAD);
+        textAlign(CENTER, CENTER);
+        text(Name, x, y);
+
+    }
+
+    void toJSON(key) {
+        replacement = new Object();
+        for (val in this)
+        {
+            if (val === "$self") {
+            }
+            else {
+                replacement[val] = this[val];
+            }
+        }
+        return replacement;
+    }
+
+} // end of Node
+
+// edge
+class Edge {
+    Node from;
+    Node to;
+    float len;
+    int count;
+
+    Edge(Node From, Node To) {
+        from = From;
+        to = To;
+        len = 50;
+    } 
+
+
+    void increment() {
+        count++;
+    }
+
+
+    void relax() {
+        float vx = to.x - from.x;
+        float vy = to.y - from.y;
+        float d = mag(vx, vy);
+
+        if (d > 0) {
+            float f = (len - d) / (d * 3);
+            float dx = f * vx;
+            float dy = f * vy;
+            to.dx += dx;
+            to.dy += dy;
+            from.dx -= dx;
+            from.dy -= dy;
+        }
+    }
+
+    void draw() {
+        stroke(palantirContext.edgeColor);
+        if (from.Status === "ok" && to.Status === "ok") {
+            if (palantirContext.pulseStuff) {
+                strokeWeight(random(0.35,1));
+            } else {
+                strokeWeight(0.35);
+            }
+        } else {
+            if (palantirContext.pulseStuff) {
+                // make the lines look like they're pulsing
+                strokeWeight(random(0.35,1));
+            } else {
+                strokeWeight(0.35);
+            }
+            stroke(palantirContext.warningColor);
+        }
+        line(from.x, from.y, to.x, to.y);
+    }
+
+    void toJSON(key) {
+        replacement = new Object();
+        for (val in this)
+        {
+            if (val === "$self") {
+            }
+            else {
+                replacement[val] = this[val];
+            }
+        }
+        return replacement;
+    }
+
+} // end of edge
+
+// main
+palantirContext.nodeCount = 0;
+palantirContext.nodes = new Node[100];
+palantirContext.nodeTable = new HashMap();
+palantirContext.edgeCount = 0;
+palantirContext.edges = new Edge[500];
+palantirContext.saveNow = false;
+palantirContext.loadNow = false;
+palantirContext.saveName = "";
+palantirContext.nodeColor   = color(#000000);
+palantirContext.textColor   = color(#ADADAD);
+palantirContext.selectColor = color(#FF3030);
+palantirContext.fixedColor  = color(#FF8080);
+palantirContext.edgeColor   = color(#ADADAD);
+palantirContext.okColor      = color(#6396D2);
+palantirContext.warningColor = color(#FFE34A);
+palantirContext.errorColor = color(#FF4040);
+palantirContext.bkgdColor   = color(#000000);
+palantirContext.databaseColor = color(#635FFF);
+//color(#CC42AA);
+//color(#2DEBFF);
+//color(#166DFF);
+//color(#A469A1);
+//color(#A469A1);
+palantirContext.javaColor = color(#3E26EB);
+palantirContext.externalColor =  color(#3EFF69);
+palantirContext.colorNodes = false;
+palantirContext.excludeOK = false;
+palantirContext.showData = false;
+palantirContext.excludeExternalUnknowns = false;
+palantirContext.excludeInternalUnknowns = false;
+palantirContext.pulseStuff = true;
+palantirContext.drawRings = true;
+palantirContext.help = false;
+palantirContext.nodeDepth = 1;
+palantirContext.myFrameRate = 25;
+palantirContext.fontSize = 10;
+
+PFont font;
+PFont infoFont;
+PFont helpFont;
+
+var helpText = new Array();;
+helpText[0]  = "lc \tfix node";
+helpText[1]  = "rc \tfree node";
+helpText[2]  = "f  \tfix all nodes";
+helpText[3]  = "u  \tfree all nodes";
+helpText[4]  = "F  \tspace and fix nodes";
+helpText[5]  = ")  \tincrease spacing";
+helpText[6]  = "(  \tdecrease spacing";
+helpText[7]  = "t  \ttrue spacing";
+helpText[8]  = "T  \tAlt spacing";
+helpText[9]  = "cc \tcenter node";
+helpText[10] = "0  \tfocus selected";
+helpText[11]  = "+  \tincrease node depth";
+helpText[12]  = "-  \tdecrease node depth";
+helpText[13] = "c  \tclear all filters";
+helpText[14] = "p  \tclear process filters";
+helpText[15] = "h  \tclear host filters";
+helpText[16] = "[  \tdecrease frame rate";
+helpText[17] = "]  \tincrease frame rate";
+helpText[18] = "o  \ttoggle exclude OKs";
+helpText[19] = "s  \tstop animation";
+helpText[20] = "g  \tstart animation";
+helpText[21] = "P  \tpulse";
+helpText[22] = "e  \ttoggle ext unknowns";
+helpText[23] = "i  \ttoggle int unknowns";
+helpText[24] = "n  \tcolour nodes";
+helpText[25] = "}  \tincrease font";
+helpText[26] = "{  \tdecrease font";
+helpText[27] = "d  \tshow data";
+helpText[28] = "r  \tdraw rings";
+helpText[29] = "k  \tdelete all nodes";
+int helpPos = 0;
+
+
+
+String infoText = ">Initialising.....";
+int infoTextPos = 0;
+int infoTextAlpha = 300;
+
+void setup() {
+    size($(window).width() - 115, $(window).height() - 25);
+    frameRate(palantirContext.myFrameRate);
+    helpFont = createFont("courier", 20);
+    infoFont = createFont("verdana", 20);
+    font = createFont("verdana", palantirContext.fontSize);
+    textFont(font);
+    smooth();
+}
+
+
+void addEdge(Node fromNode, Node toNode) {
+
+    //TODO change this and subsequent methods called to take a node, then new attributes will just be available
+    Node from = findNode(fromNode.Name,true,fromNode.Status);
+    Node to = findNode(toNode.Name,true,toNode.Status);
+    from.increment();
+    from.host = fromNode.Host;
+    if (fromNode.Stdout != "") {
+        from.Stdout = fromNode.Stdout;
+    }
+    if (fromNode.Type != "") {
+        from.Type = fromNode.Type;
+    }
+    to.increment();
+    to.host = toNode.Host;
+    if (toNode.Stdout != "") {
+        to.Stdout = toNode.Stdout;
+    }
+    if (toNode.Type != "") {
+        to.Type = toNode.Type;
+    }
+
+    for (int i = 0; i < palantirContext.edgeCount; i++) {
+        if (palantirContext.edges[i].from == from && palantirContext.edges[i].to == to) {
+            palantirContext.edges[i].increment();
+            return;
+        }   
+    } 
+
+    Edge e = new Edge(from, to);
+    e.increment();
+    if (palantirContext.edgeCount == palantirContext.edges.length) {
+        palantirContext.edges = (Edge[]) expand(palantirContext.edges);
+    }
+    palantirContext.edges[palantirContext.edgeCount++] = e;
+}
+
+
+Node findNode(String Name, boolean add, String status) {
+    Name = Name.toLowerCase();
+    Node n = (Node) palantirContext.nodeTable.get(Name);
+    if (n == null && add) {
+        return addNode(Name,status);
+    }
+    if (n != null && add) {
+        n.Status = status;
+    }
+    return n;
+}
+
+
+Node addNode(String Name,String status) {
+    Node n = new Node(Name);
+    n.Status = status;
+    if (palantirContext.nodeCount == palantirContext.nodes.length) {
+        palantirContext.nodes = (Node[]) expand(palantirContext.nodes);
+    }
+    palantirContext.nodeTable.put(Name, n);
+    palantirContext.nodes[palantirContext.nodeCount++] = n;
+    return n;
+}
+
+void assignArraysFromLists() {
+    // assign the arrays from the lists
+    palantirContext.includeArray = palantirContext.includeList.split(',');
+    palantirContext.hostIncludeArray = palantirContext.hostIncludeList.split(',');
+    palantirContext.excludeArray = palantirContext.excludeList.split(',');
+    palantirContext.hostExcludeArray = palantirContext.hostExcludeList.split(',');
+
+    for (int i = 0 ; i < palantirContext.edgeCount ; i++) {
+        palantirContext.edges[i].from.drawNode = drawThisOne(palantirContext.edges[i].from);
+        palantirContext.edges[i].to.drawNode = drawThisOne(palantirContext.edges[i].to);
+    }
+
+    // dont see how we can have a node without an edge, but....
+    for (int i = 0; i < palantirContext.nodeCount; i++) {
+        palantirContext.nodes[i].drawNode = drawThisOne(palantirContext.nodes[i]);
+    }
+
+}
+
+void draw() {
+
+    if (palantirContext.saveNow) {
+        palantirContext.saveNow = false;
+
+        instruction = {"Action": "SaveScreen", "ScreenName": palantirContext.saveName, AdditionalJSON: JSON.stringify(palantirContext)};
+        message = JSON.stringify(instruction) + "ENDOFMESSAGE";
+        socket.send(message);
+    }
+
+    if (palantirContext.loadNow) {
+        palantirContext.loadNow = false;
+        instruction = {"Action": "LoadScreen", "ScreenName": palantirContext.saveName};
+        message = JSON.stringify(instruction) + "ENDOFMESSAGE";
+        socket.send(message);
+    }
+
+    fill(palantirContext.bkgdColor);
+    rect(0,0,width,height);
+
+    for (int i = 0 ; i < palantirContext.edgeCount ; i++) {
+        if (palantirContext.edges[i].from.drawNode && palantirContext.edges[i].to.drawNode) {
+            palantirContext.edges[i].relax();
+            palantirContext.edges[i].draw();
+        }
+    }
+
+    for (int i = 0 ; i < palantirContext.nodeCount ; i++) {
+        if (palantirContext.nodes[i].drawNode) {
+            palantirContext.nodes[i].relax();
+            palantirContext.nodes[i].update();
+            palantirContext.nodes[i].draw();
+        }
+    } 
+
+    if (selection != null) {
+        textFont(helpFont);
+        fill(#95EB90);
+        textAlign(LEFT,TOP);
+        text(selection.Name,10,20);
+        text(selection.host,10,40);
+        text(selection.Status,10,60);
+        text(selection.Stdout,10,80);
+        text(selection.Type,10,100);
+        textFont(font);
+    }
+
+    if (true || palantirContext.help) {
+        textFont(helpFont);
+        fill(#95EB90);
+        textAlign(LEFT,TOP);
+        startPoint = width - 300;
+
+        int pos = 10;
+        int dir = 1;
+        if (!palantirContext.help) {
+            dir = -1;
+        }
+
+
+        helpPos = max(0,min(helpPos + dir,helpText.length()));
+
+        for (int i = 0; i < helpPos; i++) {
+            text(helpText[i],startPoint,pos);
+            pos += 20;
+        }
+
+        textFont(font);
+    }
+
+    if (infoTextAlpha >= 0) {
+        textFont(helpFont);
+        fill(#95EB90,infoTextAlpha);
+        textAlign(LEFT,BOTTOM);
+        infoTextPos += 1;
+        text(infoText.substring(0,min(infoText.length(),infoTextPos)),10,height - 20);
+        infoTextAlpha -= 3;
+        textFont(font);
+    }
+
+}
+
+boolean drawThisOne(Node node) {
+
+    if (palantirContext.excludeOK && node.Status === "ok") {
+        return false;
+    }
+
+    if (palantirContext.excludeExternalUnknowns && node.host.match("^[0-9]")) {
+        return false;
+    }
+
+    if (palantirContext.excludeInternalUnknowns && node.Name.match("^[0-9]") && !node.host.match("^[0-9]")) {
+        return false;
+    }
+
+    if (palantirContext.includeList) {
+        if (palantirContext.includeList === "*") {
+            return true;
+        }
+        for (var i in palantirContext.includeArray) {
+            if (node.Name.match("^" + palantirContext.includeArray[i] + "$")) {
+                return true;
+            }
+        }
+    }
+    if (palantirContext.hostIncludeList) {
+        if (palantirContext.hostIncludeList === "*") {
+            return true;
+        }
+        for (var i in palantirContext.hostIncludeArray) {
+            if (node.host.match("^" + palantirContext.hostIncludeArray[i] + "$")) {
+                return true;
+            }
+        }
+    }
+    if (palantirContext.excludeList) {
+        if (palantirContext.excludeList === "*") {
+            return false;
+        }
+        for (var i in palantirContext.excludeArray) {
+            if (node.Name.match("^" + palantirContext.excludeArray[i] + "$")) {
+                return false;
+            }
+        }
+    }
+    if (palantirContext.hostExcludeList) {
+        if (palantirContext.hostExcludeList === "*") {
+            return false;
+        }
+        for (var i in palantirContext.hostExcludeArray) {
+            if (node.host.match("^" + palantirContext.hostExcludeArray[i] + "$")) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+
+selection = new Node();
+focused = new Node();
+
+void mousePressed() {
+    // Ignore anything greater than this distance
+    float closest = 20;
+	 selection = null;
+    for (int i = 0; i < palantirContext.nodeCount; i++) {
+        Node n = palantirContext.nodes[i];
+        if (n.drawNode) {
+            float d = dist(mouseX, mouseY, n.x, n.y);
+            if (d < closest) {
+                selection = n;
+                closest = d;
+            }
+        }
+    }
+    if (selection != null) {
+        if (mouseButton == LEFT) {
+            selection.fixed = true;
+        } else if (mouseButton == RIGHT) {
+            selection.fixed = false;
+        } else if (mouseButton == CENTER) {
+            selection.fixed = true;
+            selection.x = width / 2;
+            selection.y = height / 2;
+            palantirContext.excludeOK = false; 
+            palantirContext.includeList = selection.Name;
+            palantirContext.excludeList = ".*";
+            palantirContext.hostIncludeList = "";
+            palantirContext.hostExcludeList = ".*";
+
+            palantirContext.nodeDepth = 0;
+            walkNode(selection,1);
+            
+            assignArraysFromLists();
+            focused = selection;
+        }
+    } // selection not null
+} // mousePressed
+
+void walkNode(Node n, int level) {
+
+    if (level > palantirContext.nodeDepth) {
+        return;
+    }
+
+    // find node + 1 links
+    for (int i = 0 ; i < palantirContext.edgeCount ; i++) {
+        if (palantirContext.edges[i].from == n) {
+            // only add this is if it isn't here already
+            if (!palantirContext.includeList.match("," + palantirContext.edges[i].to.Name + ",")
+               && !palantirContext.includeList.match(palantirContext.edges[i].to.Name + ",") 
+               && !palantirContext.includeList.match("," + palantirContext.edges[i].to.Name) 
+                ) {
+                palantirContext.includeList += "," + palantirContext.edges[i].to.Name;
+                walkNode(palantirContext.edges[i].to,level + 1);
+            }
+        } else {
+            //edges[i].from.fixed = false;
+        }
+        if (palantirContext.edges[i].to == n) {
+            // only add this is if it isn't here already
+            if (!palantirContext.includeList.match("," + palantirContext.edges[i].from.Name + ",")
+                && !palantirContext.includeList.match("," + palantirContext.edges[i].from.Name)
+                && !palantirContext.includeList.match(palantirContext.edges[i].from.Name + ",")
+                ) {
+                palantirContext.includeList += "," + palantirContext.edges[i].from.Name;
+                walkNode(palantirContext.edges[i].from,level + 1);
+            }
+        } else {
+            //edges[i].to.fixed = false;
+        }
+    }
+
+
+
+}
+
+void updateInfo(String msg, int alpha) {
+    infoTextPos = 0;
+    infoText = ">" + msg;
+    infoTextAlpha = alpha;
+}
+void keyPressed() {
+
+    switch(parseInt(key)) {
+        // H - help
+        case 72:
+            palantirContext.help = !palantirContext.help
+            break;
+        // [ - decrease frame rate
+        case 91:
+            palantirContext.myFrameRate -= 5;
+            frameRate(palantirContext.myFrameRate);
+            updateInfo("Frame rate " + palantirContext.myFrameRate,300);
+            break;
+        // ] - increase frame rate
+        case 93:
+            palantirContext.myFrameRate += 5;
+            frameRate(palantirContext.myFrameRate);
+            updateInfo("Frame rate " + palantirContext.myFrameRate,300);
+            break;
+        // } - increase font size
+        case 125:
+            palantirContext.fontSize += 5;
+            font = createFont("verdana", palantirContext.fontSize);
+            textFont(font);
+            break;
+        // { - increase font size
+        case 123:
+            palantirContext.fontSize -= 5;
+            if (palantirContext.fontSize < 10) {
+                palantirContext.fontSize = 10;
+            }
+            font = createFont("verdana", palantirContext.fontSize);
+            textFont(font);
+            break;
+        // 0 - clear all bar selected            
+        case 48:
+            if (selection == null) {
+                break;
+            }
+            palantirContext.nodeDepth = 0;
+            palantirContext.includeList = selection.Name;
+            palantirContext.excludeList = ".*";
+            palantirContext.hostIncludeList = "";
+            palantirContext.hostExcludeList = ".*";
+            assignArraysFromLists();
+            break;
+
+        // + - increment nodeDepth
+        case 43:
+
+            depthNode = selection;
+            if (depthNode == null) {
+                depthNode = focused;
+            }
+
+            if (depthNode == null ) {
+                break;
+            }
+
+            palantirContext.nodeDepth++;
+            palantirContext.includeList = depthNode.Name;
+            walkNode(depthNode,1);
+            depthNode.fixed = true;
+            updateInfo("Depth " + palantirContext.nodeDepth,300);
+            assignArraysFromLists();
+            break;
+        // - - increment nodeDepth
+        case 45:
+            depthNode = selection;
+            if (depthNode == null) {
+                depthNode = focused;
+            }
+
+            if (depthNode == null ) {
+                break;
+            }
+            if (palantirContext.nodeDepth > 0 && depthNode != null) 
+            {
+                palantirContext.nodeDepth--;
+                palantirContext.includeList = depthNode.Name;
+                walkNode(depthNode,1);
+                depthNode.fixed = true;
+                updateInfo("Depth " + palantirContext.nodeDepth,300);
+                assignArraysFromLists();
+            }
+            break;
+        // P - toggle pulse stuff
+        case 80:
+            palantirContext.pulseStuff = !palantirContext.pulseStuff;
+            break;
+        // r - draw rings
+        case 114:
+            palantirContext.drawRings = !palantirContext.drawRings;
+            break;
+        // d - toggle show data
+        case 100:
+            palantirContext.showData = !palantirContext.showData;
+            break;
+        // n - color nodes
+        case 110:
+            palantirContext.colorNodes = !palantirContext.colorNodes;
+            break;
+        // o - toggle exclude OKs
+        case 111:
+            palantirContext.excludeOK = !palantirContext.excludeOK
+            assignArraysFromLists();
+            break;
+        // e - toggle exclude external unknowns
+        case 101:
+            palantirContext.excludeExternalUnknowns = !palantirContext.excludeExternalUnknowns;
+            assignArraysFromLists();
+            updateInfo("External unknowns " + !palantirContext.excludeExternalUnknowns,300);
+            break;
+        // i - toggle exclude internal unknowns
+        case 105:
+            palantirContext.excludeInternalUnknowns = !palantirContext.excludeInternalUnknowns;
+            assignArraysFromLists();
+            updateInfo("Internal unknowns " + !palantirContext.excludeInternalUnknowns,300);
+            break;
+        // c - clear all filters
+        case 99:
+            palantirContext.includeList = "";
+            palantirContext.excludeList = "";
+            palantirContext.hostIncludeList = "";
+            palantirContext.hostExcludeList = "";
+            focused = null;
+            updateInfo("Clearing all filters",300);
+            assignArraysFromLists();
+            break;
+        // p - clear process filters
+        case 112:
+            palantirContext.includeList = "";
+            palantirContext.excludeList = "";
+            updateInfo("Clearing process filters",300);
+            assignArraysFromLists();
+            break;
+        // h - clear host filters
+        case 104:
+            palantirContext.hostIncludeList = "";
+            palantirContext.hostExcludeList = "";
+            updateInfo("Clearing host filters",300);
+            assignArraysFromLists();
+            break;
+        // s - stop
+        case 115:
+            palantirContext.myFrameRate = 1;
+            frameRate(1);
+            break;
+        // g - go
+        case 103:
+            palantirContext.myFrameRate = 30;
+            frameRate(30);
+            break;
+        // f - fix them all
+        case 102:
+            for (int i = 0; i < palantirContext.nodeCount; i++) {
+                palantirContext.nodes[i].fixed = true;    
+            }
+            break;
+        // u - unfix them all
+        case 117:
+            for (int i = 0; i < palantirContext.nodeCount; i++) {
+                palantirContext.nodes[i].fixed = false;    
+            }
+            break;
+        // U - unfix all and set them free
+        case 85:
+            for (int i = 0; i < palantirContext.nodeCount; i++) {
+                palantirContext.nodes[i].fixed = false;    
+                palantirContext.nodes[i].x = random(width);
+                palantirContext.nodes[i].y = random(height);
+            }
+            break;
+        // F - randomly fix the visible nodes
+        case 70:
+            for (int i = 0; i < palantirContext.nodeCount; i++) {
+                if (palantirContext.nodes[i].drawNode) {
+                    palantirContext.nodes[i].x = random(width);
+                    palantirContext.nodes[i].y = random(height);
+                    palantirContext.nodes[i].fixed = true;
+                }
+            }
+            break;
+        // ) - increase the length of the edges
+        case 41:
+            for (int i = 0; i < palantirContext.edgeCount; i++) {
+               palantirContext.edges[i].len += 10; 
+            }
+            break;
+        // ( - decrease the length of the edges
+        case 40:
+            for (int i = 0; i < palantirContext.edgeCount; i++) {
+               palantirContext.edges[i].len -= 10; 
+            }
+            break;
+        // * - reset the length of the edges
+        case 42:
+            for (int i = 0; i < palantirContext.edgeCount; i++) {
+               palantirContext.edges[i].len = 50; 
+            }
+            break;
+        // t - true spacing
+        case 116:
+            for (int i = 0; i < palantirContext.edgeCount; i++) {
+                Edge e = palantirContext.edges[i];
+                int fromSize = constrain(e.from.count,1,10) * 7;
+                int toSize = constrain(e.to.count,1,10) * 7;
+                e.len = fromSize + toSize + 10;
+            }
+            break;
+        // T - alt true spacing
+        case 84:
+            for (int i = 0; i < palantirContext.edgeCount; i++) {
+                Edge e = palantirContext.edges[i];
+                int fromSize = constrain(e.from.count,1,10) * 15;
+                int toSize = constrain(e.to.count,1,10) * 15;
+                e.len = max(max(fromSize,toSize),50);
+            }
+            break;
+        // k - delete all nodes
+        case 107:
+            palantirContext.edges = new Edges[palantirContext.edges.length];
+            palantirContext.nodes  = new Nodes[palantirContext.nodes.length];
+            palantirContext.nodeTable = new HashMap();
+            palantirContext.edgeCount = 0;
+            palantirContext.nodeCount = 0;
+            break;
+        // l - tail log    
+        case 108:
+            //
+            if (selection != null) {
+                instruction = {"Action": "Tail", "Host": selection.host, "Log": selection.Stdout};
+                message = JSON.stringify(instruction) + "ENDOFMESSAGE";
+                socket.send(message);
+            }
+            break;
+        // dont care 
+        default:
+            break;
+    }
+ 
+}
+
+void mouseDragged() {
+    if (selection != null) {
+        selection.x = mouseX;
+        selection.y = mouseY;
+    }
+}
+
+
+void mouseReleased() {
+    //selection = null;
+}
+
+var statusArea = document.getElementById("statusArea");
+
+if(typeof MozWebSocket !== "undefined")
+  WebSocket = MozWebSocket;
+
+var socket = new WebSocket("ws://" + document.location.hostname + ":" + document.location.port + "/websocket");
+
+socket.onopen = function () {
+   palantirContext.bkgdColor   = #000000;
+}
+
+var prevLabel = "";
+
+socket.onmessage = function(msg) {
+    if (palantirContext.showData) {
+        statusArea.innerHTML = "data "+msg.data+"<br/>"; 
+    }
+
+    // if status begin then reset the counts
+    if (msg.data.substring(0,8) === "println:") {
+        println(msg.data.substring(8));
+    } else {
+
+        if (msg.data === "status begin") {
+            for (int i = 0; i < palantirContext.nodeCount; i++) {
+                palantirContext.nodes[i].count = 0;
+            }
+        } else {
+            
+            if (msg.data === "status end") {
+                // refresh the nodes to display
+                assignArraysFromLists();
+            } else {
+                if (msg.data.substring(0,7) === "reload:") {
+                    palantirContext = jQuery.parseJSON(msg.data.substring(7));
+
+                    palantirContext.edges2 = new Edges[palantirContext.edges.length];
+                    palantirContext.nodes  = new Nodes[palantirContext.nodes.length];
+                    palantirContext.nodeTable = new HashMap();
+                    int j = 0;
+
+                    for (int i = 0 ; i < palantirContext.edgeCount ; i++) {
+
+                        if (palantirContext.edges[i] == null || palantirContext.edges[i].from == null || palantirContext.edges[i].to == null) {
+                            continue;
+                        }
+
+                        Node from = findNode(palantirContext.edges[i].from.Name,false,palantirContext.edges[i].from.Status);
+                        if (from == null) {
+                            from = new Node();
+                            from.x = palantirContext.edges[i].from.x;
+                            from.y = palantirContext.edges[i].from.y;
+                            from.dx = palantirContext.edges[i].from.dx;
+                            from.dy = palantirContext.edges[i].from.dy;
+                            from.fixed = palantirContext.edges[i].from.fixed;
+                            from.Status = palantirContext.edges[i].from.Status;
+                            from.Stdout = palantirContext.edges[i].from.Stdout;
+                            from.Type = palantirContext.edges[i].from.Type;
+                            from.Name = palantirContext.edges[i].from.Name;
+                            from.host = palantirContext.edges[i].from.host;
+                            from.count = palantirContext.edges[i].from.count;
+                            from.pulse = palantirContext.edges[i].from.pulse;
+                            from.drawNode = palantirContext.edges[i].from.drawNode;
+                            palantirContext.nodes[j] = from;
+                            j++;
+                            palantirContext.nodeTable.put(from.Name, from);
+                        }
+
+                        Node to = findNode(palantirContext.edges[i].to.Name,false,palantirContext.edges[i].to.Status);
+                        if (to == null) {
+                            to = new Node();
+                            to.x = palantirContext.edges[i].to.x;
+                            to.y = palantirContext.edges[i].to.y;
+                            to.dx = palantirContext.edges[i].to.dx;
+                            to.dy = palantirContext.edges[i].to.dy;
+                            to.fixed = palantirContext.edges[i].to.fixed;
+                            to.Status = palantirContext.edges[i].to.Status;
+                            to.Stdout = palantirContext.edges[i].to.Stdout;
+                            to.Type = palantirContext.edges[i].to.Type;
+                            to.Name = palantirContext.edges[i].to.Name;
+                            to.host = palantirContext.edges[i].to.host;
+                            to.count = palantirContext.edges[i].to.count;
+                            to.pulse = palantirContext.edges[i].to.pulse;
+                            to.drawNode = palantirContext.edges[i].to.drawNode;
+                            palantirContext.nodes[j] = to;
+                            j++;
+                            palantirContext.nodeTable.put(to.Name, to);
+                        }
+
+                        Edge edge = new Edge();
+                        edge.len = palantirContext.edges[i].len;
+                        edge.count = palantirContext.edges[i].count;
+
+                        palantirContext.edges2[i]      = edge;
+                        palantirContext.edges2[i].from = from;
+                        palantirContext.edges2[i].to   = to;
+
+
+                    }
+                    palantirContext.edges = palantirContext.edges2;
+                    palantirContext.edges2 = null;
+                }
+                else {
+                    var obj = jQuery.parseJSON(msg.data);
+
+                    if (!(obj.From == undefined)) {
+                        // From defined, implies connection object
+                        addEdge(obj.From,obj.To);
+                    } else {
+                        // process update
+                        Node n = findNode(obj.Name,false,obj.Status);
+                        if (n != null) {
+                            n.Status = obj.Status;
+                        }
+                    }
+                }
+            }
+        }
+    }
+        
+}
+
+socket.onclose = function() {
+    //statusArea.innerHTML += "closed<br/>"; 
+    palantirContext.bkgdColor   = #222222;
+}
+
+palantirContext.includeList = "";
+palantirContext.excludeList = "";
+palantirContext.hostIncludeList = "";
+palantirContext.hostExcludeList = "";
+
+$(function() {
+	$( "#dialog:ui-dialog" ).dialog( "destroy" );
+	
+	var iList = $( "#includeList" ),
+	 	eList = $( "#excludeList" );
+	
+	$( "#dialog-form" ).dialog({
+		autoOpen: false,
+		height: 400,
+		width: 350,
+		modal: true,
+		buttons: {
+			OK: function() {
+				var bValid = true;
+				// put validate functions here
+				// e.g.	bValid = bValid && checkLength( name, "username", 3, 16 );
+
+				if ( bValid ) {
+					palantirContext.includeList = iList.val();
+                    palantirContext.excludeList = eList.val();
+                    palantirContext.hostIncludeList = $( "#hostIncludeList" ).val();
+                    palantirContext.hostExcludeList = $( "#hostExcludeList" ).val();
+                    assignArraysFromLists();
+				    $( this ).dialog( "close" );
+				}
+            },
+            "Clear": function() {
+					palantirContext.includeList = "";
+                    palantirContext.excludeList = "";
+                    palantirContext.hostIncludeList = "";
+                    palantirContext.hostExcludeList = "";
+                    assignArraysFromLists();
+				    $( this ).dialog( "close" );
+            },
+			Cancel: function() {
+				$( this ).dialog( "close" );
+			}
+        },
+		close: function() {
+			//allFields.val( "" ).removeClass( "ui-state-error" );
+		}
+	});
+
+	$( "#Filters" )
+		.button()
+		.click(function() {
+            $( "#dialog-form" ).dialog( "open" );
+            $( "#includeList" ).val(palantirContext.includeList);
+            $( "#excludeList" ).val(palantirContext.excludeList);
+            $( "#hostIncludeList" ).val(palantirContext.hostIncludeList);
+            $( "#hostExcludeList" ).val(palantirContext.hostExcludeList);
+        });
+    });
+
+$(function() {
+	//$( "#dialog:ui-dialog" ).dialog( "destroy" );
+	
+	$( "#dialog-form-views" ).dialog({
+		autoOpen: false,
+		height: 400,
+		width: 350,
+		modal: true,
+		buttons: {
+            "Load": function() {
+                    palantirContext.saveName = $( "#viewName" ).val();
+                    palantirContext.loadNow = true;
+                    statusArea.innerHTML = "loading " + palantirContext.saveName + "<br/>"; 
+				    $( this ).dialog( "close" );
+            },
+            "Save": function() {
+                    palantirContext.saveName = $( "#saveViewName" ).val();
+                    palantirContext.saveNow = true;
+                    statusArea.innerHTML = "saving " + palantirContext.saveName + "<br/>"; 
+				    $( this ).dialog( "close" );
+            },
+			Cancel: function() {
+				$( this ).dialog( "close" );
+			}
+        },
+		close: function() {
+			//allFields.val( "" ).removeClass( "ui-state-error" );
+		}
+	});
+
+	$( "#Views" )
+		.button()
+		.click(function() {
+            $( "#dialog-form-views" ).dialog( "open" );
+        });
+});
+</script>
+
+<div class="demo">
+
+<div id="dialog-form" title="Filters">
+	<form>
+	<fieldset>
+		<label for="includeList">Process Include List</label>
+		<input type="text" name="includeList" id="includeList" class="text ui-widget-content ui-corner-all" />
+		<label for="excludeList">Process Exclude List</label>
+		<input type="text" name="excludeList" id="excludeList" value="" class="text ui-widget-content ui-corner-all" />
+		<label for="hostIncludeList">Host Include List</label>
+		<input type="text" name="hostIncludeList" id="hostIncludeList" class="text ui-widget-content ui-corner-all" />
+		<label for="hostExcludeList">Host Exclude List</label>
+		<input type="text" name="hostExcludeList" id="hostExcludeList" value="" class="text ui-widget-content ui-corner-all" />
+	</fieldset>
+	</form>
+</div>
+
+<div id="dialog-form-views" title="Views">
+	<form>
+	<fieldset>
+		<label for="viewName">Load View Name</label>
+		<input type="text" name="viewName" id="viewName" class="text ui-widget-content ui-corner-all" />
+		<label for="saveViewName">Save View Name</label>
+		<input type="text" name="saveViewName" id="saveViewName" class="text ui-widget-content ui-corner-all" />
+	</fieldset>
+	</form>
+</div>
+
+</div>
+
+
+<body style="background: #121212; font-family: Courier; font-size:small;">
+    <div style="float: left;">
+        <canvas id="mycanvas"></canvas>
+    </div>
+
+
+    <div style="float: right; width: 80px;" class="menu">
+        <button id="Filters">Filters</button>
+    </div>
+    <div style="float: right; width: 80px;" class="menu">
+        <button id="Views">Views</button>
+    </div>
+    <div style="float: left; width: $(window).width() - 15;color: #ADADAD;" id ="statusArea"> </div> 
+    
+</body>
