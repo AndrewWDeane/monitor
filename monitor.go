@@ -398,17 +398,6 @@ func psHost(host string, ch chan string) {
 					// different logic is needed for each though as some are elements on others are blah blah.
 
 					switch executable {
-					case "_progres":
-						// progress instances, find -U in the arg array, instance name is the next entry
-						for i, e := range cmdLine {
-							if e == "-U" {
-								if (i + 1) < len(cmdLine) {
-									instanceName = cmdLine[i+1]
-									processType = "progress"
-								}
-								break
-							}
-						}
 					case "java":
 						// lots of variants here
 						for i, e := range cmdLine {
@@ -453,14 +442,20 @@ func psHost(host string, ch chan string) {
 						//instanceName = executable + pid
 						instanceName = strings.Join(cmdLine, "_")
 						processType = "netcat"
-					default:
-						// do something?
-						processType = executable
-						instanceName = ""
+
+						/// XXX here we need to discover the generic signature of erlang applications from ps -elfwww, it will be beam + ...
+
+					case "erl":
 						instanceName = strings.Join(cmdLine, "_")
+						processType = "erl"
+					default:
+						// do something? - if we want to see all
+						instanceName = ""
+						//instanceName = strings.Join(cmdLine, "_")
+						//processType = executable
 					}
 
-					if instanceName != "" {
+					if processType != "" && instanceName != "" {
 						ch <- fmt.Sprintf("instance,%v,%v,%v,%v", instanceName, host, pid, processType)
 					}
 				}
@@ -627,8 +622,11 @@ func monitorHosts() {
 					if xrefHost, ok := knownHosts[link.To.Host]; ok {
 						link.To.Host = xrefHost
 					}
-					jsonData, _ := json.Marshal(link)
-					mainChannel <- fmt.Sprintf("%v", string(jsonData))
+
+					if from.Type != "" && to.Type != "" {
+						jsonData, _ := json.Marshal(link)
+						mainChannel <- fmt.Sprintf("%v", string(jsonData))
+					}
 
 					prevConnections[key] = connection
 					prevConnections[revKey] = connection
@@ -676,8 +674,10 @@ func monitorHosts() {
 				if xrefHost, ok := knownHosts[link.To.Host]; ok {
 					link.To.Host = xrefHost
 				}
-				jsonData, _ := json.Marshal(link)
-				mainChannel <- fmt.Sprintf("%v", string(jsonData))
+				if from.Type != "" && to.Type != "" {
+					jsonData, _ := json.Marshal(link)
+					mainChannel <- fmt.Sprintf("%v", string(jsonData))
+				}
 
 				// delete the previous connection
 				// and its revkey?
